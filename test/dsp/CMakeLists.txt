@@ -23,8 +23,13 @@ target_sources(${PROJECT_NAME} PRIVATE
 	test_HostTimeFilter.cpp
 	test_LinkAudioReceiver.cpp
 	test_MetronomePlayer.cpp
-	test_Granular.cpp
+	test_SamplePlayer.cpp
+	test_Slicing.cpp
+	test_PitchBank.cpp
+	test_GrainEngine.cpp
+	test_GrainProcessor.cpp
 	test_MorphWindow.cpp
+	test_IntellijelWavefolder.cpp
 	test_Butterworth.cpp
 	test_LinkwitzRiley.cpp
 	test_BandSplitter.cpp

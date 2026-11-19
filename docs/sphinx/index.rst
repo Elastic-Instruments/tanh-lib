@@ -10,8 +10,9 @@ components, all in namespace ``thl``:
   lookup errors, shared by State and Modulation
 - **tanh::State** — hierarchical parameter storage with RCU lock-free reads and
   JSON serialization
-- **tanh::DSP** — processors, effects, filters, granular engine, Rings resonator
-  model (also available alone as ``tanh::Resonator``)
+- **tanh::DSP** — processors, effects, filters, sample player / looper,
+  slicing, pitch banks, granular engine, Rings resonator model (also available
+  alone as ``tanh::Resonator``)
 - **tanh::Modulation** — modulation matrix with change-point sub-blocking, XY
   touch control and motion recording
 - **tanh::AudioIO** — audio device I/O over miniaudio (desktop, iOS, Android)
@@ -36,6 +37,9 @@ Platforms: macOS 12+, iOS 14+, Android, Linux, Windows, WebAssembly.
    transport
    motion_recording
    xy_controller
+   sampler
+   slicing
+   pitch
    audio_io
    api/index
    changelog
@@ -58,7 +62,8 @@ matrix from a host's parameter store; :doc:`transport` covers musical time
 (``TransportInfo``, host/internal/Link clocks) and Ableton Link;
 :doc:`motion_recording` records and loops XY gestures, and
 :doc:`xy_controller` combines touch input, recorder and a UI snapshot into
-matrix sources.
+matrix sources. :doc:`sampler`, :doc:`slicing` and :doc:`pitch` describe the
+sample playback components.
 
 The :doc:`api/index` is generated from the public headers under
 ``include/tanh/``.

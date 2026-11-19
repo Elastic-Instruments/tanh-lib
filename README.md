@@ -12,8 +12,9 @@ all in namespace `thl`:
   scope) and the lookup errors, shared by State and Modulation (built with either)
 - **tanh::State** -- hierarchical parameter storage with RCU lock-free reads and
   JSON serialization
-- **tanh::DSP** -- processors, effects, filters, granular engine, Rings resonator
-  model (also available alone as `tanh::Resonator`), transport clocks
+- **tanh::DSP** -- processors, effects, filters, sample player / looper, slicing,
+  pitch banks, granular engine, Rings resonator model (also available alone as
+  `tanh::Resonator`), transport clocks
 - **tanh::Modulation** -- modulation matrix with change-point sub-blocking, XY
   touch control and motion recording; reads any host's parameters
 - **tanh::AudioIO** -- audio device I/O over miniaudio (desktop, iOS, Android)
@@ -115,8 +116,6 @@ tanh-lib is licensed per component:
   [anira](https://github.com/anira-project/anira)) can depend on it. These
   files carry an `SPDX-License-Identifier: Apache-2.0` header; the license
   text is in [`LICENSE-APACHE-2.0`](LICENSE-APACHE-2.0).
-  The adaptive peak picker (`include/tanh/dsp/analysis/AdaptivePeakPicker.h`,
-  `src/dsp/analysis/AdaptivePeakPicker.cpp`) is also Apache-2.0.
 
 - **AGPL-3.0** — all other components (`parameters`, `state`, `dsp`, `resonator`,
   `modulation`, `audio-io`, `net`, `link`) and files (see [`LICENSE`](LICENSE)).
