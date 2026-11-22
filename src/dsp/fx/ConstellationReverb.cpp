@@ -186,7 +186,11 @@ void ConstellationReverbImpl::process_sample(float x, float& left, float& right)
     x -= m_hp_state;
 
     utils::one_pole(m_predelay_len, m_predelay_target, m_predelay_smooth);
-    x = m_predelay.write_read(x, m_predelay_len);
+    // tap(0) is the sample just written, so a 0 ms predelay passes the input
+    // straight through. (write_read(x, 0) would read the oldest slot: a full
+    // buffer, ~340 ms at 48 kHz, of delay.)
+    m_predelay.write(x);
+    x = m_predelay.tap(m_predelay_len);
 
     utils::one_pole(m_bw_state, x, m_bw_coeff);
     x = m_bw_state;

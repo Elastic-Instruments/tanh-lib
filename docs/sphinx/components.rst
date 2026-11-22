@@ -28,6 +28,7 @@ tanh-lib in one process stay apart; code spells ``thl::`` (see
        net        [label="tanh::Net\nHttpClient, Sha256,\nAssetStore"];
        link       [label="tanh::Link\nLinkSession (Ableton Link)", style="rounded,dashed"];
        graph_node [label="tanh::Graph\nprocessor graph,\nlatency compensation"];
+       link       [label="tanh::Link\nLinkSession (Ableton Link)", style="rounded,dashed"];
 
        parameters -> core;
        state -> parameters;

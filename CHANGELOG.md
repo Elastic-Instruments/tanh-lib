@@ -9,6 +9,11 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- `THIRD_PARTY_NOTICES.md`: the third-party code the components embed (pffft, miniaudio,
+  nlohmann/json, readerwriterqueue and the zlib-licensed semaphore in it, Signalsmith Stretch
+  and Linear, and with `TANH_BUILD_LINK` Ableton Link, its Asio and LinkKit), with version,
+  source, component and licence text, installed to `share/doc/tanh`. A product that ships
+  tanh-lib carries these notices.
 - Host hand-over, as a DAW's Touch mode: a Replace / ReplaceHold routing with
   `ModulationRouting::m_share_with_host` (`XYRouteOptions::m_share_with_host`) shares
   its target with the host. The last of the two writers to become active owns it;
@@ -43,28 +48,37 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - `thl::modulation::BlockProcessor`: work a `ModulationMatrix` runs once per block
   before any source (`add_block_processor()`), given a `BlockContext` with the block
   length and the transport passed to `process()` / `process_with_scope()`.
-- `thl::dsp::transport::TransportInfo`: trivially copyable per-block snapshot with
-  the flags `k_jumped`, `k_started`, `k_stopped`, `k_tempo_changed` and
-  `k_timeline_reset`, derived for every clock by a `ContinuityTracker` that absorbs
-  jitter and in-block tempo changes, so consumers react to flags and never compare
-  beats. `HostTransportClock` follows the host's playhead with fallbacks for omitted
-  fields. `HostTimeFilter` maps a callback's sample time to host time. Tests:
-  `TransportInfo.*`, `ContinuityTracker.*`, `TransportClock.*`, `HostTransportClock*.*`,
-  `HostTimeFilter.*`. Docs: `transport.md`.
 - `tanh::Link` (`TANH_BUILD_LINK`, off by default for its licence):
   `thl::link::LinkSession` over the Link 4.1 SDK (pinned commit) on macOS, Linux and
   Windows and LinkKit 4.1.2 (pinned SHA256, CMake 3.28+) on iOS, with
   `capabilities()` for what each SDK lets the app control. `LinkTransportClock` sits
   in DSP behind the `LinkBackend` seam (`timeline_backend()`), takes the callback's
-  host time through `set_host_time_us()`, compensates output latency and applies
-  requests at the output time with launches quantized to the session's quantum
-  (`set_quantum()`). Link Audio: `audio_channels()`, `set_audio_input()` and the
+  host time through `set_host_time_us()` (else a `HostTimeFilter` maps the sample
+  time to host time), compensates output latency and applies requests at the output
+  time with launches quantized to the session's quantum (`set_quantum()`). A peer's
+  tempo change dated within 50 ms of the block is `k_tempo_changed`, not `k_jumped`;
+  a stop dated ahead lands in its block; the first realignment within 1.5 s of an
+  epoch change is the `k_timeline_reset`, while our own play or seek right after it
+  is a plain jump. Link Audio: `audio_channels()`, `set_audio_input()` and the
   `audio_backend()` seam (received buffers in, our output out, sent with the clock's
   capture of the same block); `LinkAudioReceiver` plays the received channel on the
   local beat grid a latency behind. Built and tested in every desktop and iOS
-  preset. Tests: `LinkTransportClock.*` (fake session), `LinkAudioReceiver.*`,
-  `LinkSession.*`, `LinkAudioCodec.*`, and with the label `link-peers` (excluded by
-  the presets) `LinkPeers.*`, `LinkPeersAudio.*`. Docs: `transport.md`.
+  preset. Tests: `LinkTransportClock.*` (fake session), `HostTimeFilter.*`,
+  `LinkAudioReceiver.*`, `LinkSession.*`, `LinkAudioCodec.*`, and with the label
+  `link-peers` (excluded by the presets) `LinkPeers.*`, `LinkPeersAudio.*`. Docs:
+  `transport.md`.
+- `thl::dsp::transport::TransportInfo`: trivially copyable per-block snapshot with
+  the flags `k_jumped`, `k_started`, `k_stopped`, `k_tempo_changed` and
+  `k_timeline_reset`, derived for every clock by a `ContinuityTracker` that absorbs
+  jitter and in-block tempo changes, so consumers react to flags and never compare
+  beats. A block that continues the previous one starts exactly at its end, so a
+  division boundary on a block edge counts once, and a block lands on the source's
+  end, so it is in phase with it (after a large tempo drop with a smaller block that
+  block holds or runs back to get there); a non-finite beat or tempo holds the
+  block. `HostTransportClock` follows the host's playhead with fallbacks for omitted fields, ignores non-finite
+  host values, and takes the tempo from the host's beats when the host sends the
+  beat but no tempo. Tests: `TransportInfo.*`, `ContinuityTracker.*`,
+  `TransportClock.*`, `HostTransportClock*.*`. Docs: `transport.md`.
 - `thl::modulation::MotionRecorder` and `MotionLane`: record an XY gesture on the
   audio thread into preallocated memory and loop it back synced to the transport,
   with touch override and a glide back. Every take is a Beats loop of whole bars:
@@ -289,8 +303,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   `on_prepare()`, and `prepare()`, `begin_block()`, `end_block()`, `block_info()` (now a
   reference), `beat_at_sample()`, `division_in_block()` and the tempo, signature and
   play getters are non-virtual in the base. `begin_block()` takes only the frame
-  count; Link's host time goes to `LinkTransportClock::set_host_time_us()`.
-  `sample_position()` counts samples played since `prepare()` on every clock.
+  count. `sample_position()` counts samples played since `prepare()` on every clock.
   `Division` moved to `TransportInfo.h`. `InternalTransportClock`: a tempo change
   keeps the beat continuous. An API and ABI change for subclasses.
 - `ParameterDefinitions.h` and `ModulationScope.h` moved from `tanh/state/` to
@@ -365,28 +378,19 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
-- Clocks: a tempo change inside a block, or a Link peer's dated within 50 ms, is
-  `k_tempo_changed`, not `k_jumped`; a Link stop dated ahead lands in its block; the
-  first realignment within 1.5 s of a Link epoch change is the `k_timeline_reset`;
-  `HostTransportClock` drops a seek made while the host supplies the beat and
-  trusts its play flag only with tempo, beat or time signature. Tests:
-  `HostTransportClockTempoMap.*`, `LinkTransportClock.JoinRealignmentAfterTheEpochResets`,
-  `HostTransportClock.SeekWhileHostSuppliesBeatIsDropped`.
-- Clocks: a block that continues the previous one starts exactly at its end, so a
-  division boundary on a block edge counts once (it could count twice or not at
-  all with a host's sample-derived ppq); the time signature is set in one atomic,
-  never seen half updated; a seek or tempo request is taken once (it could apply
-  in two blocks); `InternalTransportClock::prepare()` keeps the beat at a new sample
-  rate. Tests: `HostTransportClock.DivisionsOnBlockEdgesCountOnce`,
-  `InternalTransportClock.{TimeSignatureIsNeverTorn,SeekAppliesOnce,PrepareKeepsTheBeatAtANewSampleRate}`.
+- `InternalTransportClock`: the time signature is set in one atomic, never seen half
+  updated; a seek or tempo request is taken once (it could apply in two blocks);
+  `prepare()` keeps the beat, also at a new sample rate, and with an invalid sample
+  rate keeps the rate but still flags the next block `k_timeline_reset`; a seek to a
+  huge beat no longer overflows; a non-finite tempo is ignored. Tests:
+  `InternalTransportClock.{TimeSignatureIsNeverTorn,SeekAppliesOnce,PrepareKeepsTheBeatAtANewSampleRate,InvalidPrepareStillResets,HugeSeekIsSafe,NonFiniteTempoIsIgnored}`.
+- `MetronomePlayer` places its clicks on the clock's resolved beats (its slope, not
+  bpm / (60 · sample rate)), so a beat on a block edge clicks once. Test:
+  `MetronomePlayer.EveryBeatClicksOnceWithAJitteryHost`.
 - `XYController`: the trail keeps its spacing across blocks shorter than the trail
   interval; a reset that closes a latched gate adds a change point at sample 0.
   Tests: `XYFramePublisher.TrailKeepsItsSpacingAcrossShortBlocks`,
   `XYController.LatchKeepsTheGateOpenUntilTurnedOff`.
-- Link clock: our own play or seek right after an epoch change is a plain jump,
-  not the join's `k_timeline_reset`, and ends the wait for it; the host-time filter
-  starts over after host times, so a stall while they arrived does not offset it.
-  Tests: `LinkTransportClock.{OwnSeekAfterTheEpochIsNotAReset,FilterStartsOverWhenHostTimesStop}`.
 - RCU: read scopes on one thread or reader slot nest; closing an inner one freed
   the outer one's version (e.g. `audio_read_scope()` around `ModulationMatrix::process()`).
   Test: `RCU.NestedReadScopesKeepTheOuterVersion`.
@@ -433,7 +437,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - `SmartHandle<T>::raw_handle()`: a backend has no `ParameterHandle`. Use
   `State::get_handle<T>(key)`; hosts write base values through their own API.
-- The `host_time_micros` parameter of `TransportClock::begin_block()` (see Changed).
+- The `host_time_micros` parameter of `TransportClock::begin_block()` (see Changed): a
+  clock that needs host time takes it through its own setter.
 
 
 ## [0.5.0] - 2026-11-01

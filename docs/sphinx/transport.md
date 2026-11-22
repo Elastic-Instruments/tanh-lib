@@ -32,7 +32,10 @@ chunks (the discontinuity flags stay on the first chunk).
 Every clock feeds its raw beats through a `ContinuityTracker`, which compares
 the block's start beat with the previous block's end. Inside a window the start
 snaps onto the expected beat and the slope is re-fitted to land on the source's
-end beat; outside it the block is `k_jumped`. The window is
+end beat, so the block is in phase with the source at its end. After a large
+tempo drop inside the previous block, the source can be behind that block's end
+by more than a short block covers: the block then holds or runs back within
+itself to land there. Outside the window the block is `k_jumped`. The window is
 `[min(0, e) - tol, max(0, e) + tol]`:
 
 - `tol` is the jitter tolerance (2 samples by default);
