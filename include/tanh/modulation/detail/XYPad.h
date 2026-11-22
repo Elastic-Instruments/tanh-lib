@@ -47,7 +47,7 @@ struct XYPadTiming {
 };
 
 /**
- * @brief The touch input of one XYController voice: UI touches in, one
+ * @brief The touch input of one XY dot: UI touches in, one
  *        sample-accurate x / y / active stream out.
  *
  * Several fingers reduce to one stream by MonoPriority. Coordinates are
@@ -77,7 +77,7 @@ public:
     bool flush();
 
     /// Drain the queue and render @p num_samples (at most the prepared size).
-    /// @p block_time_ns is the clock time of this block (see XYController::set_block_time()).
+    /// @p block_time_ns is the clock time of this block (the time the block is placed at).
     void process_block(uint32_t num_samples, std::optional<int64_t> block_time_ns = std::nullopt)
         TANH_NONBLOCKING_FUNCTION;
     /// The stream of the last process_block().
@@ -126,7 +126,7 @@ private:
     thl::core::LockFreeQueue<XYPadEvent, k_xy_pad_queue_capacity> m_queue;
 
     // UI thread only.
-    std::array<Slot, k_xy_controller_max_touches> m_slots{};
+    std::array<Slot, k_xy_pad_max_touches> m_slots{};
     Pending m_pending;
     uint64_t m_press_counter = 0;
 

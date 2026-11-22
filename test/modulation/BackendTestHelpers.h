@@ -12,7 +12,7 @@
 #include <string>
 #include <string_view>
 
-namespace xy_test {
+namespace backend_test {
 
 constexpr double k_sr = 48000.0;
 
@@ -68,4 +68,4 @@ struct SimTransport {
     }
 };
 
-}  // namespace xy_test
+}  // namespace backend_test

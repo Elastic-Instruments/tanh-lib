@@ -12,9 +12,6 @@ target_sources(${PROJECT_NAME} PRIVATE
 	test_ResolvedTarget.cpp
 	test_XYPad.cpp
 	test_RoutingEnabled.cpp
-	test_XYController.cpp
-	test_XYControllerThreads.cpp
-	test_XYControllerInput.cpp
 	test_MotionLane.cpp
 	test_MotionRecorder.cpp
 	test_MotionRecorderClock.cpp
@@ -60,7 +57,6 @@ if(TARGET tanh::State)
 		test_DspFixture_Wavefolder.cpp
 		test_DspFixture_Limiter.cpp
 		test_DspFixture_Reverb.cpp
-		test_XYControllerState.cpp
 	)
 	target_link_libraries(${PROJECT_NAME} PRIVATE tanh::DSP tanh::State)
 	# The DSP fixtures also run their processors inside graphs (DspFixture.h).
@@ -82,7 +78,6 @@ endif()
 if(TARGET tanh::State)
 	add_executable(benchmark_modulation
 		benchmark_ModulationMatrix.cpp
-		benchmark_XYController.cpp
 	)
 
 	target_link_libraries(benchmark_modulation

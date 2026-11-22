@@ -153,7 +153,7 @@ came from.
 
 ## Rendering several sources together
 
-A component whose sources share one render (an `XYController` renders every
+A component whose sources share one render (an XY controller renders every
 dot's x, y and gate in one pass) or that follows the transport registers a
 `BlockProcessor` with `ModulationMatrix::add_block_processor()`. The matrix
 calls its `process_block(BlockContext)` once per block, after the sources'

@@ -21,7 +21,7 @@ struct BlockContext {
  * @brief Work a ModulationMatrix runs once per block, before any source.
  *
  * For a component that renders several sources together or needs the block's
- * transport (XYController renders every dot's x, y and gate in one pass, synced
+ * transport (an XY controller renders every dot's x, y and gate in one pass, synced
  * to the transport). Register it with ModulationMatrix::add_block_processor().
  *
  * Threading: prepare() on the message thread (from ModulationMatrix::prepare(),

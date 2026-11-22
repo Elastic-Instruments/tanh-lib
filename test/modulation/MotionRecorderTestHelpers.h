@@ -4,7 +4,7 @@
 #include <tanh/dsp/transport/TransportInfo.h>
 #include <tanh/modulation/MotionLane.h>
 #include <tanh/modulation/MotionRecorder.h>
-#include <tanh/modulation/XYController.h>
+#include <tanh/modulation/detail/XYPad.h>
 
 #include <algorithm>
 #include <cmath>
@@ -14,7 +14,6 @@
 #include <vector>
 
 #include "../dsp/SimHost.h"
-#include "XYPad.h"
 
 namespace motion_test {
 
@@ -24,8 +23,9 @@ using thl::dsp::transport::TransportInfo;
 constexpr double k_sr = 48000.0;
 
 /// A simulated host drives a HostTransportClock, whose per-block TransportInfo
-/// (with real discontinuity flags) drives pad and recorder in the order
-/// XYController uses. Every output sample is kept.
+/// (with real discontinuity flags) drives pad and recorder in the order an XY
+/// controller would: the pad drains its touches, then the recorder renders.
+/// Every output sample is kept.
 struct Rig {
     explicit Rig(uint32_t block,
                  double bpm = 120.0,

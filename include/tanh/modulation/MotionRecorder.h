@@ -65,8 +65,8 @@ enum class StoppedTransport : uint8_t {
  * (set_smoothing()) and moved by the application's transform (set_transform()); a live touch
  * always overrides it, and the output glides back on release (detail::MotionCompositor).
  *
- * XYController owns one recorder per voice and calls process(); recorder(v) gives the UI and
- * message thread access to the rest.
+ * Its owner (an XY controller: one recorder per dot, fed by a detail::XYPad) calls process()
+ * on the audio thread and gives the UI and message thread access to the rest.
  *
  * Threading:
  * - ctor, prepare, set_transform: message thread, audio stopped (prepare allocates).
@@ -156,7 +156,7 @@ public:
     }
     [[nodiscard]] uint32_t num_samples() const TANH_NONBLOCKING_FUNCTION { return m_num_samples; }
 
-    /// State at the end of the last block (audio thread; the UI reads XYFrame).
+    /// State at the end of the last block (audio thread; the owner publishes it to the UI).
     [[nodiscard]] MotionSnapshot snapshot() const TANH_NONBLOCKING_FUNCTION;
     /// Playback phase at the end of the last block, in seconds or beats into the loop.
     [[nodiscard]] double playback_phase() const TANH_NONBLOCKING_FUNCTION {

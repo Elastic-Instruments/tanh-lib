@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <tanh/modulation/MotionRecorder.h>
-#include <tanh/modulation/XYController.h>
+#include <tanh/modulation/detail/XYPad.h>
 
 #include <atomic>
 #include <cmath>
@@ -9,8 +9,6 @@
 #include <random>
 #include <thread>
 #include <vector>
-
-#include "XYPad.h"
 
 using namespace thl::modulation;
 using thl::modulation::detail::XYPad;

@@ -1,8 +1,7 @@
-#include "XYPad.h"
-
 #include <tanh/core/AbiNamespace.h>
 #include <tanh/modulation/MotionTypes.h>
 #include <tanh/modulation/XYTypes.h>
+#include <tanh/modulation/detail/XYPad.h>
 #include <tanh/utils/RealtimeSanitizer.h>
 
 #include <algorithm>
@@ -17,7 +16,7 @@
 namespace thl::inline THL_ABI_NAMESPACE::modulation::detail {
 
 XYPad::XYPad(uint32_t max_touches, MonoPriority priority)
-    : m_max_touches(std::clamp<uint32_t>(max_touches, 1, k_xy_controller_max_touches))
+    : m_max_touches(std::clamp<uint32_t>(max_touches, 1, k_xy_pad_max_touches))
     , m_priority(priority) {}
 
 void XYPad::prepare(size_t samples_per_block, const XYPadTiming& timing) {

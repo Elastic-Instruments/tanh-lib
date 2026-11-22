@@ -249,7 +249,7 @@ void MotionRecorder::on_take(TakeEvent event) TANH_NONBLOCKING_FUNCTION {
 void MotionRecorder::process(const TransportInfo& t,
                              const MotionInput& in,
                              uint32_t num_samples) TANH_NONBLOCKING_FUNCTION {
-    // The buffers hold the prepared maximum; XYController splits larger blocks.
+    // The buffers hold the prepared maximum; the caller splits larger blocks.
     assert(num_samples <= m_max_block && "MotionRecorder: block exceeds the prepared size");
     const auto n = static_cast<uint32_t>(std::min<size_t>(num_samples, m_max_block));
     m_num_samples = n;

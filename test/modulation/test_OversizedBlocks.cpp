@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
 #include <tanh/modulation/ModulationMatrix.h>
 
-#include "XYControllerTestHelpers.h"
+#include "BackendTestHelpers.h"
 
 using namespace thl::modulation;
-using xy_test::FakeBackend;
-using xy_test::k_sr;
+using backend_test::FakeBackend;
+using backend_test::k_sr;
 
 namespace {
 constexpr uint32_t k_bs = 256;  // prepared maximum

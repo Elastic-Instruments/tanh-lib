@@ -364,7 +364,7 @@ void ModulationMatrix::process_with_scope(const ProcessingConfig& config,
     for (auto* source : config.m_all_sources) { source->clear_per_block(); }
 
     // 1b. Block processors render what their sources copy out below (e.g. an
-    //     XYController's dots), once per block and before the drain pass.
+    //     an XY controller's dots), once per block and before the drain pass.
     const BlockContext context{.m_num_samples = num_samples, .m_transport = transport};
     for (auto* processor : config.m_block_processors) { processor->process_block(context); }
 

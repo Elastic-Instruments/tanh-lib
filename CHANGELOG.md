@@ -15,7 +15,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   source, component and licence text, installed to `share/doc/tanh`. A product that ships
   tanh-lib carries these notices.
 - Host hand-over, as a DAW's Touch mode: a Replace / ReplaceHold routing with
-  `ModulationRouting::m_share_with_host` (`XYRouteOptions::m_share_with_host`) shares
+  `ModulationRouting::m_share_with_host` shares
   its target with the host. The last of the two writers to become active owns it;
   when the owner stops, the other takes over if active, else the value stays. Every
   hand-over crossfades (`HostShareTimes`: take 20 ms, return 50 ms, host hold 300 ms;
@@ -114,21 +114,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   drawing. Tests: `MotionLanePlayer.Transform*`,
   `MotionRecorderOverwrite.LiftedLooperPlaysSmoothedAndTransformed`. Docs:
   `motion_recording.md`.
-- `thl::modulation::XYController`: XY dots (voices), each with touch input and a
-  recorder, as `<id>.x` / `.y` / `.active` matrix sources (`XYOutput`). A
-  `BlockProcessor` of the matrix, it renders once per block with the matrix's
-  transport (free-running without one), owns its routings and publishes an `XYFrame`
-  per block, plus a recording trail and the recorded path. `for_each_recorder()`
-  reaches every voice's recorder. `XYRouteOptions::m_skip_during_gesture` leaves a
-  target alone while its knob is held (a host gesture). Tests: `XYController*.*`,
-  `XYPad.*`. Docs: `xy_controller.md`.
-- Timestamped touch input: `XYController::touch()` / `touch_voice()` / `release()`
-  take an optional `time_ns`, and `set_block_time(now_ns)` once per block places them
-  at their own sample, `m_input_delay_ms` late (default one prepared block + 5 ms);
-  late touches land at offset 0, later ones wait. x / y ramp linearly between timed
-  moves (change point every `m_render_interval` samples); down, up and finger
-  switches stay sharp. Untimed touches, or a block without a block time, spread as
-  before. Tests: `XYControllerInput.*`, `XYPad.Timed*`.
+- `thl::modulation::detail::XYPad` (`tanh/modulation/detail/XYPad.h`, with `XYTypes.h`):
+  the touch input of one XY dot, the motion recorder's input. Fingers on the UI thread
+  (`TouchId`, `MonoPriority` choosing the driving one) in, per-sample x, y and gate out
+  through a lock-free queue. Timestamped touches are placed at their own sample, a
+  fixed input delay late (late ones land at offset 0, later ones wait); x / y ramp
+  linearly between timed moves, down, up and finger switches stay sharp; untimed
+  touches spread over the block. Tests: `XYPad.*`. Docs: `motion_recording.md`.
 - Core: `thl::core::uptime_ns()` (`Clock.h`), the uptime clock of UITouch, NSEvent
   and host times on Apple platforms, `steady_clock` elsewhere; `thl::TripleBuffer<T>`,
   a wait-free SPSC latest-value mailbox; `thl::SeqLock`, the sequence counter of a
@@ -387,18 +379,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - `MetronomePlayer` places its clicks on the clock's resolved beats (its slope, not
   bpm / (60 · sample rate)), so a beat on a block edge clicks once. Test:
   `MetronomePlayer.EveryBeatClicksOnceWithAJitteryHost`.
-- `XYController`: the trail keeps its spacing across blocks shorter than the trail
-  interval; a reset that closes a latched gate adds a change point at sample 0.
-  Tests: `XYFramePublisher.TrailKeepsItsSpacingAcrossShortBlocks`,
-  `XYController.LatchKeepsTheGateOpenUntilTurnedOff`.
 - RCU: read scopes on one thread or reader slot nest; closing an inner one freed
   the outer one's version (e.g. `audio_read_scope()` around `ModulationMatrix::process()`).
   Test: `RCU.NestedReadScopesKeepTheOuterVersion`.
-- `XYController::set_block_time()` holds for one `matrix.process()`: documented that
-  a host splitting its block sets it per chunk.
-- `XYController`: a repeated `prepare()` re-prepares the recorders; a take published
-  by `service()` during a block no longer switches that block to the older lane it
-  still reads. Tests: `MotionRecorderThreads.ConcurrentServiceKeepsTheHandoffSilent`.
+- `MotionRecorder`: a take published by `service()` during a block no longer switches
+  that block to the older lane it still reads. Tests:
+  `MotionRecorderThreads.ConcurrentServiceKeepsTheHandoffSilent`.
 - `Graph`: a node that turns the phase (its `process_with_dry()` dry signal is not its input,
   e.g. a crossover) no longer steps when its wet mix reaches 0 or leaves it. The bypass passes
   the plain sources, while a blend's dry signal is the phase-matched one; the switch between the
