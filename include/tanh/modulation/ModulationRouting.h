@@ -50,6 +50,8 @@ struct HostShareTimes {
     static constexpr float k_take_ms = 20.0f;
     static constexpr float k_return_ms = 50.0f;
     static constexpr float k_hold_ms = 300.0f;
+    // set_host_share_times() clamps every time to [0, k_max_ms] (NaN gives the default).
+    static constexpr float k_max_ms = 60000.0f;
 
     // While the hand-over weight moves, the matrix flags a change point on the
     // target at least every this many samples (and where the ramp starts and ends).

@@ -28,9 +28,6 @@
 #ifdef TANH_LINK_ENABLED
 #include <tanh/link/LinkSession.h>
 #endif
-#ifdef TANH_LINK_ENABLED
-#include <tanh/link/LinkSession.h>
-#endif
 #ifdef TANH_AUDIO_IO_ENABLED
 #include <tanh/audio-io/AudioDeviceManager.h>
 #endif

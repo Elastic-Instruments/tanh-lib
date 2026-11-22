@@ -20,7 +20,8 @@ std::optional<ParameterBinding> StateParameterBackend::find(std::string_view key
 
     ParameterBinding binding{.m_def = record->m_def,
                              .m_base = std::monostate{},
-                             .m_in_gesture = &record->m_in_gesture};
+                             .m_in_gesture = &record->m_in_gesture,
+                             .m_host_change_stamp = &record->m_change_stamp};
     auto& cache = record->m_cache;
     switch (record->m_def.m_type) {
         case ParameterType::Float: binding.m_base = &cache.m_atomic_float; break;

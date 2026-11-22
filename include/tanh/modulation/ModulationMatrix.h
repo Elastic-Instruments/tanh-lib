@@ -70,13 +70,9 @@ struct ProcessingConfig {
     // via add_source(), including sources with no routings.
     std::vector<ModulationSource*> m_all_sources;
 
-    // Every add_block_processor(), run once per block before the drain pass.
-    std::vector<BlockProcessor*> m_block_processors;
-
-    // samples_per_block of the prepare() this config was built for: the length
-    // of every source and target buffer, and the largest num_samples
-    // process_with_scope() accepts.
-    size_t m_samples_per_block = 0;
+    // Built after prepare(): before it, sources have no buffers and
+    // process_with_scope() does nothing.
+    bool m_prepared = false;
 };
 
 class TANH_API ModulationMatrix {
@@ -154,9 +150,9 @@ public:
     }
 
     /// Process all sources and fill modulation buffers for all targets.
-    /// num_samples must not exceed the prepared samples_per_block (the length of
-    /// every buffer): split larger host blocks into chunks. A larger value
-    /// asserts and is clamped.
+    /// num_samples must not exceed the samples_per_block given to prepare(), the
+    /// host's announced maximum (the length of every buffer). Does nothing
+    /// before prepare().
     /// Convenience wrapper that opens a read scope internally — use when the
     /// caller doesn't need to extend the scope across downstream DSP work.
     ///
@@ -238,6 +234,9 @@ public:
     // Get a SmartHandle for a backend parameter. Lazily creates a ResolvedTarget
     // the first time a parameter key is requested. The returned SmartHandle
     // holds a stable pointer into the target map — no registration needed.
+    // The backend is asked every time: a binding that moved (State::clear()
+    // and the key created again) rebinds the target. Handles from before the
+    // move are invalid, like the State's own.
     //
     // T must match the parameter's native type (the ParameterBinding::m_base
     // alternative: float, double, int, bool).
@@ -302,7 +301,8 @@ public:
 
     /// Times of the host hand-over of every target shared with the host
     /// (ModulationRouting::m_share_with_host). Any thread; the audio thread
-    /// picks them up at the next block. Defaults: HostShareTimes.
+    /// picks them up at the next block. Defaults: HostShareTimes. Each time is
+    /// clamped to [0, HostShareTimes::k_max_ms]; NaN gives its default.
     void set_host_share_times(const HostShareTimes& times);
     [[nodiscard]] HostShareTimes host_share_times() const;
 
@@ -343,8 +343,17 @@ private:
     void rebuild_schedule_with_lock();
 
     // Ensure a target exists for id, created from the backend's binding for
-    // it. Returns a stable reference. Must be called with m_writer_mutex held.
+    // it, or rebound to it if the binding's atomics moved. Returns a stable
+    // reference. Must be called with m_writer_mutex held.
     ResolvedTarget& ensure_target_with_lock(std::string_view id, const ParameterBinding& binding);
+
+    // Resolve a routing's target through the backend: false if the key is
+    // unknown, not modulatable or has no base atomic. m_writer_mutex held.
+    bool resolve_routing_target_with_lock(std::string_view id);
+
+    // Publish m_block_processors to the audio thread; waits until it no longer
+    // reads the previous list. m_writer_mutex held.
+    void publish_block_processors_with_lock();
 
     // Routing lookup helpers — must be called with m_writer_mutex held.
     ModulationRouting* find_user_routing_with_lock(std::string_view source_id,
@@ -427,6 +436,16 @@ private:
     // Registered block processors (not owned), in registration order — protected
     // by m_writer_mutex.
     std::vector<BlockProcessor*> m_block_processors;
+
+    // The audio thread's copy of m_block_processors, published apart from the
+    // ProcessingConfig so that adding or removing one rebuilds nothing (a
+    // rebuild drops every ReplaceHold hold). Read inside an m_config read
+    // section; the writer swaps it and waits out m_config's readers before
+    // freeing the old list.
+    std::unique_ptr<const std::vector<BlockProcessor*>> m_block_processor_list =
+        std::make_unique<const std::vector<BlockProcessor*>>();
+    std::atomic<const std::vector<BlockProcessor*>*> m_audio_block_processors{
+        m_block_processor_list.get()};
 
     // Registered targets (owned) — protected by m_writer_mutex.
     // Pointer stability guaranteed by std::unordered_map.

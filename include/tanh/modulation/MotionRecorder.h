@@ -269,7 +269,6 @@ private:
     std::atomic<uint32_t> m_transform_version{0};
     std::atomic<StoppedTransport> m_stopped_mode{StoppedTransport::FreeRun};
     double m_sample_rate = 48000.0;
-    size_t m_max_block = 0;
     uint32_t m_num_samples = 0;
     std::atomic<uint32_t> m_take_serial{0};  // written by the audio thread, read by clear()
     std::atomic<bool> m_clear_takes{false};  // clear(): end the take at the next block

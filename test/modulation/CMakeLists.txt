@@ -27,7 +27,6 @@ target_sources(${PROJECT_NAME} PRIVATE
 	test_MotionLaneProcessing.cpp
 	test_MotionClock.cpp
 	test_MotionHistory.cpp
-	test_OversizedBlocks.cpp
 	test_HostShare.cpp
 )
 

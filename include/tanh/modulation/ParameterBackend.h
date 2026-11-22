@@ -42,9 +42,11 @@ using ParameterBaseValue = std::variant<std::monostate,
  * @brief Everything the modulation matrix needs to know about one parameter.
  *
  * Returned by ParameterBackend::find() and copied into the matrix's
- * ResolvedTarget the first time a key is resolved (get_smart_handle(),
- * add_routing()); the matrix never asks the backend about that key again. The pointed-to atomics
- * must therefore stay valid (same address) for the lifetime of the ModulationMatrix.
+ * ResolvedTarget when a key is resolved (get_smart_handle(), add_routing(),
+ * from_json()). The pointed-to atomics must stay valid (same address) for the
+ * lifetime of the ModulationMatrix, or until the next resolution of the key
+ * returns new ones (State::clear() and the key created again): the target is
+ * then rebound and keeps the definition it was first resolved with.
  */
 struct ParameterBinding {
     /// Immutable metadata: range (normalized depth, replace range, snapping),
@@ -88,8 +90,8 @@ struct ParameterBinding {
  *
  * Decouples the matrix from thl::State: a host implements find() on top of
  * its own parameter store. find() is only called from non-real-time matrix
- * methods (get_smart_handle() and add_routing(), for a key not resolved yet)
- * under the matrix's writer mutex, so it may allocate and lock.
+ * methods (get_smart_handle(), add_routing(), from_json()) under the
+ * matrix's writer mutex, so it may allocate and lock.
  *
  * StateParameterBackend (tanh/modulation/StateParameterBackend.h) is the
  * implementation used by ModulationMatrix(thl::State&).
@@ -110,8 +112,10 @@ public:
     /// Report an unknown @p key (find() returned std::nullopt) to a caller that
     /// requires it, e.g. ModulationMatrix::get_smart_handle(). Throws
     /// thl::ParameterNotFoundException; a backend may throw a more specific
-    /// subclass (StateParameterBackend throws what thl::State does).
-    [[noreturn]] virtual void throw_not_found(std::string_view key) const {
+    /// subclass (StateParameterBackend throws what thl::State does). Not
+    /// [[noreturn]]: if an override returns, the caller throws
+    /// thl::ParameterNotFoundException itself.
+    virtual void throw_not_found(std::string_view key) const {
         throw thl::ParameterNotFoundException(key);
     }
 };

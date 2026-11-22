@@ -358,18 +358,132 @@ TEST(ParameterBackend, LookupErrorTypes) {
     EXPECT_EQ(matrix.get_target("gain"), nullptr);
 }
 
-// The backend is asked about a key once; the matrix's target holds the binding.
-TEST(ParameterBackend, FindsEachKeyOnce) {
+// The backend is asked on every lookup: a binding that moved (the host's store
+// rebuilt, State::clear() and the key created again) rebinds the target, and new
+// handles read the new atomic. The target and its definition stay.
+TEST(ParameterBackend, AMovedBindingRebindsTheTarget) {
     FakeBackend backend;
-    backend.add("gain", mod_float(thl::Range::linear(0.0f, 1.0f), 0.0f));
+    backend.add("gain", mod_float(thl::Range::linear(0.0f, 1.0f), 0.25f));
+    ModulationMatrix matrix(backend);
+    ConstSource src;
+    src.m_value = 0.5f;
+    matrix.add_source("src", &src);
+    auto before = matrix.get_smart_handle<float>("gain");
+    ASSERT_NE(matrix.add_routing({"src", "gain", 0.1f}), k_invalid_routing_id);
+    matrix.prepare(k_sample_rate, k_block_size);
+    matrix.process(k_block_size);
+    EXPECT_NEAR(before.load(0), 0.25f + 0.05f, 1e-6f);
+
+    backend.add("gain", mod_float(thl::Range::linear(0.0f, 1.0f), 0.75f));  // moved
+    auto after = matrix.get_smart_handle<float>("gain");
+    EXPECT_EQ(after.target(), before.target());
+    matrix.process(k_block_size);
+    EXPECT_NEAR(after.load(0), 0.75f + 0.05f, 1e-6f);
+    matrix.remove_source("src");
+}
+
+// A key whose binding has no base atomic (a host lookup miss bound as null) is
+// rejected everywhere: the hand-over pass would read it on the audio thread.
+TEST(ParameterBackend, ABindingWithoutBaseIsRejected) {
+    class NullBaseBackend : public ParameterBackend {
+    public:
+        std::optional<ParameterBinding> find(std::string_view /*key*/) const override {
+            return ParameterBinding{.m_def = mod_float(thl::Range::linear(0.0f, 1.0f), 0.0f),
+                                    .m_base = static_cast<std::atomic<float>*>(nullptr)};
+        }
+    };
+    NullBaseBackend backend;
     ModulationMatrix matrix(backend);
     ConstSource src;
     matrix.add_source("src", &src);
-    (void)matrix.get_smart_handle<float>("gain");
-    (void)matrix.get_smart_handle<float>("gain");
-    EXPECT_NE(matrix.add_routing({"src", "gain"}), k_invalid_routing_id);
-    EXPECT_TRUE(matrix.update_routing_replace_range_normalized("src", "gain", 0.2f, 0.8f));
-    EXPECT_EQ(backend.m_finds, 1);
+    ModulationRouting routing("src", "p", 1.0f);
+    routing.m_combine_mode = CombineMode::Replace;
+    routing.m_share_with_host = true;
+    EXPECT_EQ(matrix.add_routing(routing), k_invalid_routing_id);
+    EXPECT_THROW(matrix.get_smart_handle<float>("p"), thl::ParameterTypeMismatchException);
+
+    matrix.from_json(nlohmann::json::array({{{"source_id", "src"},
+                                             {"target_id", "p"},
+                                             {"combine_mode", "replace"},
+                                             {"share_with_host", true}}}));
+    EXPECT_EQ(matrix.get_target("p"), nullptr);
+    matrix.prepare(k_sample_rate, k_block_size);
+    matrix.process(k_block_size);  // the stored routing is skipped
+    matrix.remove_source("src");
+}
+
+// A throw_not_found() override that returns does not get a handle handed out.
+TEST(ParameterBackend, AReturningThrowNotFoundStillThrows) {
+    class QuietBackend : public FakeBackend {
+    public:
+        void throw_not_found(std::string_view /*key*/) const override {}
+    };
+    QuietBackend backend;
+    ModulationMatrix matrix(backend);
+    EXPECT_THROW(matrix.get_smart_handle<float>("missing"), thl::ParameterNotFoundException);
+}
+
+// Routings restored by from_json() resolve their targets like add_routing():
+// their normalized replace range works without a get_smart_handle() first.
+TEST(ParameterBackend, FromJsonResolvesTheTargets) {
+    FakeBackend backend;
+    backend.add("freq", mod_float(thl::Range::linear(0.0f, 1000.0f), 900.0f));
+    ConstSource src;
+    src.m_value = 0.5f;
+    nlohmann::json json;
+    {
+        ModulationMatrix matrix(backend);
+        matrix.add_source("src", &src);
+        ModulationRouting routing("src", "freq", 1.0f);
+        routing.m_combine_mode = CombineMode::Replace;
+        ASSERT_NE(matrix.add_routing(routing), k_invalid_routing_id);
+        json = matrix.to_json(false);
+        matrix.remove_source("src");
+    }
+
+    ModulationMatrix restored(backend);
+    restored.add_source("src", &src);
+    restored.from_json(json);
+    ASSERT_NE(restored.get_target("freq"), nullptr);
+    EXPECT_TRUE(restored.update_routing_replace_range_normalized("src", "freq", 0.25f, 0.75f));
+
+    auto handle = restored.get_smart_handle<float>("freq");
+    restored.prepare(k_sample_rate, k_block_size);
+    restored.process(k_block_size);
+    EXPECT_FLOAT_EQ(handle.load(0), 500.0f);
+    restored.remove_source("src");
+}
+
+// process() before the first prepare() does nothing: sources have no buffers yet.
+TEST(ParameterBackend, ProcessBeforePrepareDoesNothing) {
+    FakeBackend backend;
+    backend.add("gain", mod_float(thl::Range::linear(0.0f, 1.0f), 0.25f));
+    ModulationMatrix matrix(backend);
+    ConstSource src;
+    matrix.add_source("src", &src);
+    auto handle = matrix.get_smart_handle<float>("gain");
+    ASSERT_NE(matrix.add_routing({"src", "gain", 0.5f}), k_invalid_routing_id);
+
+    matrix.process(k_block_size);
+    EXPECT_EQ(matrix.get_num_processed_samples(), 0u);
+    EXPECT_FLOAT_EQ(handle.load(0), 0.25f);
+
+    matrix.prepare(k_sample_rate, k_block_size);
+    matrix.process(k_block_size);
+    EXPECT_FLOAT_EQ(handle.load(0), 0.25f + 0.5f);
+    matrix.remove_source("src");
+}
+
+// A handle without a target (a bare atomic) reports a default definition.
+TEST(ParameterBackend, AHandleWithoutTargetHasADefaultDefinition) {
+    std::atomic<float> value{0.3f};
+    const SmartHandle<float> handle(&value, nullptr);
+    EXPECT_FLOAT_EQ(handle.load(), 0.3f);
+    EXPECT_FLOAT_EQ(handle.load_normalized(), 0.3f);
+    EXPECT_TRUE(handle.key().empty());
+    EXPECT_EQ(handle.id(), thl::ParameterDefinition{}.m_id);
+    EXPECT_FLOAT_EQ(handle.range().m_min, 0.0f);
+    EXPECT_FLOAT_EQ(handle.range().m_max, 1.0f);
 }
 
 TEST(ParameterBackend, JsonRoundTripWithoutState) {

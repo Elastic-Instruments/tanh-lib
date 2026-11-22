@@ -214,9 +214,8 @@ capacity.
 
 ## Pitfalls
 
-- **Block size.** `process()` takes at most the prepared block size (debug
-  builds assert, release builds clamp). Split larger blocks with
-  `TransportInfo::sub_block()`.
+- **Block size.** `process()` takes at most the prepared `samples_per_block`,
+  the host's announced maximum: pass the host block as it comes.
 - **Memory.** Each recorder allocates a take buffer and two hand-over slots of
   `MotionRecorderConfig::m_max_points` (default 32768) points at 9 bytes each
   (x, y and gate), plus a raw seam tail of a quarter of the points per slot.

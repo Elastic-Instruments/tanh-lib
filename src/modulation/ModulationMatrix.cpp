@@ -1,6 +1,7 @@
 #include "tanh/modulation/ModulationMatrix.h"
 
 #include <tanh/core/Exports.h>
+#include <tanh/core/threading/SeqLock.h>
 #include <tanh/dsp/transport/TransportInfo.h>
 #include <tanh/modulation/BlockProcessor.h>
 
@@ -21,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -93,6 +95,19 @@ thl::ParameterType stored_parameter_type(const ParameterBaseValue& base,
     return def_type;
 }
 
+// The binding has a base atomic to read (not std::monostate, not null).
+bool has_base_value(const ParameterBaseValue& base) {
+    return std::visit(
+        [](const auto& alternative) {
+            if constexpr (std::is_same_v<std::decay_t<decltype(alternative)>, std::monostate>) {
+                return false;
+            } else {
+                return alternative != nullptr;
+            }
+        },
+        base);
+}
+
 }  // namespace
 
 template <typename T>
@@ -100,29 +115,27 @@ SmartHandle<T> ModulationMatrix::get_smart_handle(const std::string_view param_k
     std::scoped_lock const lock(m_writer_mutex);
 
     // Same checks, order and exception types as State::get_handle<T>()
-    // followed by the modulatable check, for every backend. A resolved target
-    // holds the binding: the backend is asked only the first time.
-    const auto existing = m_targets.find(param_key);
-    std::optional<ParameterBinding> binding;
-    if (existing == m_targets.end()) {
-        binding = m_backend.find(param_key);
-        if (!binding) { m_backend.throw_not_found(param_key); }
+    // followed by the modulatable check, for every backend. The backend is
+    // asked every time, so a binding that moved rebinds the target.
+    const std::optional<ParameterBinding> binding = m_backend.find(param_key);
+    if (!binding) {
+        m_backend.throw_not_found(param_key);
+        // An override that returns must still not hand out a handle.
+        throw thl::ParameterNotFoundException(param_key);
     }
-    const ParameterBaseValue& base_value = binding ? binding->m_base : existing->second.m_base;
-    const ParameterDefinition& def = binding ? binding->m_def : existing->second.m_def;
 
-    auto* const* base = std::get_if<std::atomic<T>*>(&base_value);
+    auto* const* base = std::get_if<std::atomic<T>*>(&binding->m_base);
     if (base == nullptr || *base == nullptr) {
-        throw thl::ParameterTypeMismatchException(thl::parameter_type_of<T>(),
-                                                  stored_parameter_type(base_value, def.m_type));
+        throw thl::ParameterTypeMismatchException(
+            thl::parameter_type_of<T>(),
+            stored_parameter_type(binding->m_base, binding->m_def.m_type));
     }
 
-    if (!def.is_modulatable()) {
+    if (!binding->m_def.is_modulatable()) {
         throw std::invalid_argument("Parameter '" + std::string(param_key) +
                                     "' has modulation disabled");
     }
 
-    if (!binding) { return {*base, &existing->second}; }
     return {*base, &ensure_target_with_lock(param_key, *binding)};
 }
 
@@ -137,7 +150,25 @@ template TANH_API SmartHandle<bool> ModulationMatrix::get_smart_handle<bool>(std
 ResolvedTarget& ModulationMatrix::ensure_target_with_lock(const std::string_view id,
                                                           const ParameterBinding& binding) {
     auto it = m_targets.find(id);
-    if (it != m_targets.end()) { return it->second; }
+    if (it != m_targets.end()) {
+        ResolvedTarget& t = it->second;
+        const bool moved = t.m_base != binding.m_base || t.m_in_gesture != binding.m_in_gesture ||
+                           t.m_host_change_stamp != binding.m_host_change_stamp;
+        if (moved) {
+            // The audio thread reads these pointers through the published
+            // config: publish one without any target and wait out its readers
+            // before swapping them. The definition stays the one first
+            // resolved (SmartHandles read it on the audio thread).
+            m_config.replace([](ProcessingConfig&) {});
+            m_config.synchronize();
+            t.m_base = binding.m_base;
+            t.m_in_gesture = binding.m_in_gesture;
+            t.m_host_change_stamp = binding.m_host_change_stamp;
+            t.m_host_share.m_reset_pending.store(true, std::memory_order_release);
+            rebuild_schedule_with_lock();
+        }
+        return t;
+    }
 
     // ResolvedTarget is non-movable (holds atomics) — use try_emplace to
     // default-construct the value in place.
@@ -156,6 +187,15 @@ ResolvedTarget& ModulationMatrix::ensure_target_with_lock(const std::string_view
     t.m_scope = resolve_parameter_scope_with_lock(id, t.m_def.m_modulation_scope);
 
     return t;
+}
+
+bool ModulationMatrix::resolve_routing_target_with_lock(const std::string_view id) {
+    const std::optional<ParameterBinding> binding = m_backend.find(id);
+    if (!binding || !binding->m_def.is_modulatable() || !has_base_value(binding->m_base)) {
+        return false;
+    }
+    ensure_target_with_lock(id, *binding);
+    return true;
 }
 
 // ── Scope registry ──────────────────────────────────────────────────────────
@@ -344,12 +384,9 @@ void ModulationMatrix::process_with_scope(const ProcessingConfig& config,
                                           size_t num_samples,
                                           const dsp::transport::TransportInfo* transport)
     TANH_NONBLOCKING_FUNCTION {
-    // 0. Every buffer holds the prepared maximum: the caller splits larger host
-    //    blocks (see "Block size" in docs/sphinx/transport.md). Clamp so a
-    //    violation in a release build cannot write past the buffers.
-    assert(num_samples <= config.m_samples_per_block &&
-           "ModulationMatrix: num_samples exceeds the prepared samples_per_block");
-    num_samples = std::min(num_samples, config.m_samples_per_block);
+    // 0. Before prepare() sources have no buffers. Every buffer holds the
+    //    prepared samples_per_block, the host's announced maximum.
+    if (!config.m_prepared) { return; }
 
     // 1. Source per-block reset. Wipes change-point lists by default. Value
     //    buffers and active masks are intentionally *not* touched here —
@@ -366,7 +403,9 @@ void ModulationMatrix::process_with_scope(const ProcessingConfig& config,
     // 1b. Block processors render what their sources copy out below (e.g. an
     //     an XY controller's dots), once per block and before the drain pass.
     const BlockContext context{.m_num_samples = num_samples, .m_transport = transport};
-    for (auto* processor : config.m_block_processors) { processor->process_block(context); }
+    for (auto* processor : *m_audio_block_processors.load(std::memory_order_acquire)) {
+        processor->process_block(context);
+    }
 
     // 2. Drain pass — every registered source consumes its event queue and
     //    freezes per-block input state (values + masks + CPs). Runs exactly
@@ -455,14 +494,23 @@ void ModulationMatrix::add_block_processor(BlockProcessor& processor) {
     // Prepared before it is published, like a source added after prepare().
     if (m_prepared) { processor.prepare(m_sample_rate, m_samples_per_block); }
     m_block_processors.push_back(&processor);
-    rebuild_schedule_with_lock();
+    publish_block_processors_with_lock();
 }
 
 void ModulationMatrix::remove_block_processor(BlockProcessor& processor) {
     std::scoped_lock const lock(m_writer_mutex);
-    std::erase(m_block_processors, &processor);
-    rebuild_schedule_with_lock();
+    if (std::erase(m_block_processors, &processor) == 0) { return; }
+    publish_block_processors_with_lock();
+}
+
+void ModulationMatrix::publish_block_processors_with_lock() {
+    // No rebuild: that would drop every ReplaceHold hold. The audio thread
+    // loads the list inside an m_config read section, so once synchronize()
+    // returns nobody reads the previous one.
+    auto list = std::make_unique<const std::vector<BlockProcessor*>>(m_block_processors);
+    m_audio_block_processors.store(list.get(), std::memory_order_release);
     m_config.synchronize();
+    m_block_processor_list = std::move(list);
 }
 
 void ModulationMatrix::remove_source(const std::string_view id) {
@@ -514,23 +562,15 @@ uint32_t ModulationMatrix::add_routing(const ModulationRouting& routing) {
         return k_invalid_routing_id;
     }
 
-    // Reject routing if target parameter is unknown or not modulatable. A
-    // resolved target holds the binding: the backend is asked only the first time.
-    const auto existing = m_targets.find(routing.m_target_id);
-    std::optional<ParameterBinding> binding;
-    if (existing == m_targets.end()) { binding = m_backend.find(routing.m_target_id); }
-    const bool modulatable = existing != m_targets.end()
-                                 ? existing->second.m_def.is_modulatable()
-                                 : binding && binding->m_def.is_modulatable();
-    if (!modulatable) {
+    // Reject routing if target parameter is unknown, not modulatable or has no
+    // base atomic (the hand-over pass reads it on the audio thread).
+    if (!resolve_routing_target_with_lock(routing.m_target_id)) {
         thl::Logger::logf(thl::Logger::LogLevel::Warning,
                           "modulation",
                           "Routing rejected: target '%s' is not a modulatable parameter.",
                           routing.m_target_id.c_str());
         return k_invalid_routing_id;
     }
-
-    if (binding) { ensure_target_with_lock(routing.m_target_id, *binding); }
 
     const uint32_t id = m_next_routing_id++;
     m_user_routings.push_back(routing);
@@ -744,7 +784,20 @@ size_t ModulationMatrix::set_routings_enabled(std::span<const RoutingEnabled> ch
     std::scoped_lock const lock(m_writer_mutex);
     // One seqlock batch (the mutex makes this the only writer): the audio
     // thread sees all of these flags or none (snapshot_routing_enabled()).
-    m_enabled_lock.write_begin();
+    // Closed on every exit, a throw included (m_config.read() may register
+    // this thread as a reader), or the sequence would stay odd for good.
+    struct WriteSection {
+        explicit WriteSection(thl::SeqLock& seqlock) : m_seqlock(seqlock) {
+            m_seqlock.write_begin();
+        }
+        ~WriteSection() { m_seqlock.write_end(); }
+        WriteSection(const WriteSection&) = delete;
+        WriteSection& operator=(const WriteSection&) = delete;
+        WriteSection(WriteSection&&) = delete;
+        WriteSection& operator=(WriteSection&&) = delete;
+        thl::SeqLock& m_seqlock;
+    };
+    const WriteSection section(m_enabled_lock);
 
     size_t applied = 0;
     m_config.read([&](const ProcessingConfig& config) {
@@ -756,8 +809,6 @@ size_t ModulationMatrix::set_routings_enabled(std::span<const RoutingEnabled> ch
             ++applied;
         }
     });
-
-    m_enabled_lock.write_end();
     return applied;
 }
 
@@ -902,12 +953,14 @@ void ModulationMatrix::rebuild_schedule_with_lock() {
         // The host hand-over runs on mono buffers only: a polyphonic target
         // keeps its routings' plain Replace behaviour.
         const bool share = has_mono && it->second.m_host_share;
-        if (has_poly && it->second.m_host_share) {
+        const bool share_ignored = has_poly && it->second.m_host_share;
+        if (share_ignored && !target.m_host_share_ignored_warned) {
             thl::Logger::logf(thl::Logger::LogLevel::Warning,
                               "modulation",
                               "Target '%s' is polyphonic: m_share_with_host is ignored.",
                               id.c_str());
         }
+        target.m_host_share_ignored_warned = share_ignored;
 
         // Voice buffers. Skip allocation when the scope is registered with zero
         // voices — there's nothing for downstream consumers to index into.
@@ -1150,8 +1203,7 @@ void ModulationMatrix::rebuild_schedule_with_lock() {
         config.m_active_targets = std::move(new_active_targets);
         config.m_host_share_targets = std::move(new_host_share_targets);
         config.m_all_sources = std::move(new_all_sources);
-        config.m_block_processors = m_block_processors;
-        config.m_samples_per_block = m_samples_per_block;
+        config.m_prepared = m_prepared;
         config.m_routings_by_source.clear();
         for (const auto& r : config.m_routings) {
             config.m_routings_by_source[r.m_source].push_back(&r);
@@ -2004,10 +2056,24 @@ void ModulationMatrix::apply_routing_change_points_with_scope(const ResolvedRout
 
 // ── Host hand-over ──────────────────────────────────────────────────────────
 
+namespace {
+
+// A time in [0, HostShareTimes::k_max_ms]; NaN gives @p fallback.
+float sanitize_host_share_ms(float ms, float fallback) {
+    if (std::isnan(ms)) { return fallback; }
+    return std::clamp(ms, 0.0f, HostShareTimes::k_max_ms);
+}
+
+}  // namespace
+
 void ModulationMatrix::set_host_share_times(const HostShareTimes& times) {
-    m_host_share_take_ms.store(times.m_take_ms, std::memory_order_relaxed);
-    m_host_share_return_ms.store(times.m_return_ms, std::memory_order_relaxed);
-    m_host_share_hold_ms.store(times.m_hold_ms, std::memory_order_relaxed);
+    m_host_share_take_ms.store(sanitize_host_share_ms(times.m_take_ms, HostShareTimes::k_take_ms),
+                               std::memory_order_relaxed);
+    m_host_share_return_ms.store(
+        sanitize_host_share_ms(times.m_return_ms, HostShareTimes::k_return_ms),
+        std::memory_order_relaxed);
+    m_host_share_hold_ms.store(sanitize_host_share_ms(times.m_hold_ms, HostShareTimes::k_hold_ms),
+                               std::memory_order_relaxed);
 }
 
 HostShareTimes ModulationMatrix::host_share_times() const {
@@ -2259,6 +2325,16 @@ void ModulationMatrix::from_json(const nlohmann::json& json) {
         }
     };
 
+    // Helper: resolve every loaded routing's target, as add_routing() does, so
+    // the routings work (and update_routing_replace_range_normalized() finds
+    // their range) without a get_smart_handle() first. Unresolvable ones stay
+    // stored and are skipped by the rebuild.
+    auto resolve_targets = [this]() {
+        for (const auto& r : m_user_routings) {
+            (void)resolve_routing_target_with_lock(r.m_target_id);
+        }
+    };
+
     // Restore routings
     if (json.contains("modulation_routings") && json["modulation_routings"].is_array()) {
         m_user_routings.clear();
@@ -2266,12 +2342,14 @@ void ModulationMatrix::from_json(const nlohmann::json& json) {
             m_user_routings.push_back(parse_routing(obj));
         }
         finalize_ids();
+        resolve_targets();
         rebuild_schedule_with_lock();
     } else if (json.is_array()) {
         // Bare routings array (from to_json(false))
         m_user_routings.clear();
         for (const auto& obj : json) { m_user_routings.push_back(parse_routing(obj)); }
         finalize_ids();
+        resolve_targets();
         rebuild_schedule_with_lock();
     }
 

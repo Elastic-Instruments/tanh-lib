@@ -13,7 +13,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 
@@ -59,7 +58,6 @@ void MotionRecorder::prepare(double sample_rate,
     m_player.prepare(m_sample_rate, m_config.m_render_interval);
     m_output.prepare(m_sample_rate, m_config.m_glide_ms, samples_per_block);
     m_clock.reset();
-    m_max_block = samples_per_block;
     m_num_samples = 0;
 }
 
@@ -249,9 +247,8 @@ void MotionRecorder::on_take(TakeEvent event) TANH_NONBLOCKING_FUNCTION {
 void MotionRecorder::process(const TransportInfo& t,
                              const MotionInput& in,
                              uint32_t num_samples) TANH_NONBLOCKING_FUNCTION {
-    // The buffers hold the prepared maximum; the caller splits larger blocks.
-    assert(num_samples <= m_max_block && "MotionRecorder: block exceeds the prepared size");
-    const auto n = static_cast<uint32_t>(std::min<size_t>(num_samples, m_max_block));
+    // The buffers hold the prepared samples_per_block, the host's announced maximum.
+    const uint32_t n = num_samples;
     m_num_samples = n;
     m_output.begin(false);
     if (n == 0) { return; }

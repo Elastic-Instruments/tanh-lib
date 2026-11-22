@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <tanh/dsp/transport/TransportInfo.h>
+#include <tanh/modulation/BlockProcessor.h>
 #include <tanh/modulation/ModulationMatrix.h>
 #include <tanh/modulation/ModulationRouting.h>
 #include <tanh/modulation/ModulationSource.h>
@@ -17,6 +18,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -315,6 +317,43 @@ TEST(HostShare, ConfiguredTimesApply) {
     EXPECT_NEAR(r.last(), 0.4f, k_eps);
     r.blocks(10);  // 10 ms hold = 480 samples, then 2 ms back
     EXPECT_NEAR(r.last(), 0.8f, k_eps);
+}
+
+// Times are clamped to [0, k_max_ms]; NaN gives the default.
+TEST(HostShare, ConfiguredTimesAreSanitized) {
+    Rig r;
+    r.matrix->set_host_share_times({.m_take_ms = std::numeric_limits<float>::quiet_NaN(),
+                                    .m_return_ms = -5.0f,
+                                    .m_hold_ms = std::numeric_limits<float>::infinity()});
+    const HostShareTimes times = r.matrix->host_share_times();
+    EXPECT_FLOAT_EQ(times.m_take_ms, HostShareTimes::k_take_ms);
+    EXPECT_FLOAT_EQ(times.m_return_ms, 0.0f);
+    EXPECT_FLOAT_EQ(times.m_hold_ms, HostShareTimes::k_max_ms);
+    r.a.m_active = true;
+    r.run_ms(30.0f);
+    EXPECT_NEAR(r.last(), 0.8f, k_eps);
+}
+
+// Adding or removing a block processor rebuilds nothing: a ReplaceHold keeps its hold.
+TEST(HostShare, BlockProcessorsKeepTheHold) {
+    struct Idle : BlockProcessor {
+        void prepare(double, size_t) override {}
+        void process_block(const BlockContext&) TANH_NONBLOCKING_FUNCTION override {}
+    } idle;
+    Rig r;
+    r.a.m_active = true;
+    r.run_ms(30.0f);
+    r.a.m_active = false;
+    r.run_ms(100.0f);
+    EXPECT_NEAR(r.last(), 0.8f, k_eps);
+    r.matrix->add_block_processor(idle);
+    r.run_ms(100.0f);
+    r.matrix->remove_block_processor(idle);
+    r.run_ms(100.0f);
+    EXPECT_EQ(r.state().m_owner, HostShareOwner::Modulation);
+    for (size_t i = r.m_heard.size() - samples(200.0f); i < r.m_heard.size(); ++i) {
+        ASSERT_NEAR(r.m_heard[i], 0.8f, k_eps);
+    }
 }
 
 // ── Ramps ────────────────────────────────────────────────────────────────────

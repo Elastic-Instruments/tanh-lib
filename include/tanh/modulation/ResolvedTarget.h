@@ -381,6 +381,9 @@ struct ResolvedTarget {
     // Whether the last rebuild shared this target with the host (writer-only),
     // so the next one that shares it again resets m_host_share.
     bool m_host_share_published = false;
+    // The rebuild warned that this polyphonic target ignores m_share_with_host
+    // (warned once, not on every rebuild). Writer-only.
+    bool m_host_share_ignored_warned = false;
 
     // Owner of the currently-published VoiceBuffers / MonoBuffers. Touched only
     // under m_writer_mutex. Paired with the atomic pointers above.

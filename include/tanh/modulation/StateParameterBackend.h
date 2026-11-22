@@ -17,7 +17,9 @@ namespace thl::inline THL_ABI_NAMESPACE::modulation {
  * @brief ParameterBackend over a thl::State.
  *
  * Bindings point straight into the State's ParameterRecord (the native-type
- * atomic of its AtomicCacheEntry, and m_in_gesture). Records are heap-owned by
+ * atomic of its AtomicCacheEntry, m_in_gesture, and m_change_stamp as the
+ * host-change stamp: every write through State counts as host activity).
+ * Records are heap-owned by
  * the State and never move, so the pointers stay valid until State::clear()
  * or the State's destruction — the same lifetime ParameterHandle has.
  *

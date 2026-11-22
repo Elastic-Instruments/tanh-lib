@@ -21,7 +21,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   hand-over crossfades (`HostShareTimes`: take 20 ms, return 50 ms, host hold 300 ms;
   `ModulationMatrix::set_host_share_times()`), flagging change points at least every
   32 samples while it moves. Host activity: `ParameterBinding::m_host_change_stamp`
-  (a counter the backend bumps on every host write) and the gesture flag.
+  (a counter the backend bumps on every host write; `StateParameterBackend` binds
+  `ParameterRecord::m_change_stamp`, bumped by every write through `State`) and the
+  gesture flag.
   `ModulationSource::output_activity()` separates "driven" from "value valid" (an XY
   pad's x / y: touch, playback or latch); `"share_with_host": true` is serialised.
   Tests: `HostShare.*`. Docs: `host_parameters.md`.
@@ -32,8 +34,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   is (no option). Install test: `test/install-modulation`.
 - `thl::modulation::ParameterBackend`: `ModulationMatrix` reads parameters through a
   backend (`find(key)` returns definition, base atomic and gesture flag) instead of
-  `thl::State`, so a host binds its own parameter store without mirroring it; a key
-  is looked up once. An unknown key throws through `throw_not_found()`
+  `thl::State`, so a host binds its own parameter store without mirroring it. A
+  binding that moved (`State::clear()` and the key created again) is taken up by the
+  next `get_smart_handle()` / `add_routing()` for that key; a binding without a base
+  atomic is rejected. `from_json()` resolves its routings' targets. An unknown key throws through `throw_not_found()`
   (`ParameterNotFoundException`, or State's subclasses for a State-backed matrix).
   `ModulationMatrix(thl::State&)` keeps working through `StateParameterBackend` and,
   with `state()`, is only declared when tanh is built with State. Modulation builds
@@ -47,7 +51,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   serialised only when disabled. Tests: `RoutingEnabled.*`.
 - `thl::modulation::BlockProcessor`: work a `ModulationMatrix` runs once per block
   before any source (`add_block_processor()`), given a `BlockContext` with the block
-  length and the transport passed to `process()` / `process_with_scope()`.
+  length and the transport passed to `process()` / `process_with_scope()`. Adding or
+  removing one rebuilds nothing, so ReplaceHold holds stay.
 - `tanh::Link` (`TANH_BUILD_LINK`, off by default for its licence):
   `thl::link::LinkSession` over the Link 4.1 SDK (pinned commit) on macOS, Linux and
   Windows and LinkKit 4.1.2 (pinned SHA256, CMake 3.28+) on iOS, with
@@ -304,12 +309,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   `StateKeyNotFoundException` and `StateGroupNotFoundException` derive from
   `ParameterNotFoundException`. State links `tanh::Parameters`.
 - `ModulationMatrix::process()` / `process_with_scope()` take the block's
-  `TransportInfo` (optional) for the block processors, and `process()` requires
-  `num_samples <= samples_per_block` (it wrote past its buffers): debug builds
-  assert, release builds clamp.
+  `TransportInfo` (optional) for the block processors. Before the first `prepare()`
+  they do nothing (sources had no buffers yet). They, and `MotionRecorder::process()`,
+  trust the prepared `samples_per_block`, the host's announced maximum.
 - `SmartHandle<T>` reads the base value through the backend's atomic: it is built
-  from `(std::atomic<T>*, ResolvedTarget*)`, and the metadata accessors and
-  `load_normalized()` assert on a handle without a target.
+  from `(std::atomic<T>*, ResolvedTarget*)`. A handle without a target reports a
+  default definition (range [0, 1], empty key).
 - `ModulationMatrix::prepare()` needs audio stopped, as a host's `prepareToPlay`
   does: it re-prepares every source and block processor and resets the sample
   counter. A same-size `prepare()` during audio was documented as safe but raced

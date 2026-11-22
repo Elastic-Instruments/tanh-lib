@@ -21,6 +21,11 @@
 
 namespace thl::inline THL_ABI_NAMESPACE::modulation {
 
+namespace detail {
+// The definition a SmartHandle without a target reports.
+inline const thl::ParameterDefinition k_unbound_definition{};
+}  // namespace detail
+
 // SmartHandle<T> reads a parameter's base value through the atomic its
 // ParameterBackend bound (ParameterBinding::m_base) and adds per-sample
 // modulation buffer support. Holds a stable pointer to a ResolvedTarget in the
@@ -28,9 +33,9 @@ namespace thl::inline THL_ABI_NAMESPACE::modulation {
 //
 // - Unmodulated: m_target is nullptr or both buffer pointers null → reads
 //   the backend's base atomic directly (~1ns)
-// - A handle without a target (built from a bare atomic) supports load() and
-//   the change-point accessors only; the metadata accessors and
-//   load_normalized() need the target's ParameterDefinition and assert on it.
+// - A handle without a target (built from a bare atomic) has no definition:
+//   the metadata accessors report a default one (range [0, 1], id 0, empty
+//   key) and load_normalized() normalizes the base value with it.
 // - Modulated: applies base + modulation_buffer[offset] with type conversion
 //
 // The hot path is a single std::memory_order_acquire load of either the
@@ -199,27 +204,25 @@ public:
     bool is_valid() const TANH_NONBLOCKING_FUNCTION { return m_base != nullptr; }
 
     // ── Metadata accessors (RT-safe — immutable after construction) ──────
-    // Require a handle from ModulationMatrix::get_smart_handle() (a target).
+    // A handle without a target reports detail::k_unbound_definition.
     [[nodiscard]] const thl::ParameterDefinition& def() const TANH_NONBLOCKING_FUNCTION {
-        assert(m_target != nullptr && "SmartHandle::def() needs a matrix handle");
-        return m_target->m_def;
+        return m_target != nullptr ? m_target->m_def : detail::k_unbound_definition;
     }
     [[nodiscard]] const thl::Range& range() const TANH_NONBLOCKING_FUNCTION {
         return def().m_range;
     }
     [[nodiscard]] std::string_view key() const TANH_NONBLOCKING_FUNCTION {
-        assert(m_target != nullptr && "SmartHandle::key() needs a matrix handle");
-        return m_target->m_id;
+        return m_target != nullptr ? std::string_view(m_target->m_id) : std::string_view{};
     }
     [[nodiscard]] uint32_t id() const TANH_NONBLOCKING_FUNCTION { return def().m_id; }
     [[nodiscard]] uint32_t flags() const TANH_NONBLOCKING_FUNCTION { return def().m_flags; }
 
     // Read the parameter value normalized to [0, 1] at a given sample offset.
     // For normalized buffers this avoids the from_norm→to_norm roundtrip.
-    // Requires a handle from ModulationMatrix::get_smart_handle() (a target).
+    // Without a target: the base value through def()'s range.
     float load_normalized(uint32_t modulation_offset = 0,
                           uint32_t voice_index = 0) const TANH_NONBLOCKING_FUNCTION {
-        assert(m_target != nullptr && "SmartHandle::load_normalized() needs a matrix handle");
+        if (m_target == nullptr) { return range().to_normalized(static_cast<float>(load_base())); }
 
         float base_f = 0.0f;
         float mod = 0.0f;

@@ -211,8 +211,9 @@ the parameter from its own modulation.
   Use `set_routing_enabled(id, false)`: the routing writes nothing, its held
   value is dropped and nothing is rebuilt. `set_routings_enabled(batch)` flips
   several so that no block sees half of the change.
-- **Block size.** `process()` takes at most the prepared `samples_per_block`;
-  split larger host blocks (see [Transport](transport.md), "Block size").
+- **Block size.** `process()` takes at most the prepared `samples_per_block`,
+  the host's announced maximum: pass the host block as it comes. Before
+  `prepare()` it does nothing.
 - **Saving.** With a host backend, `to_json()` / `from_json()` contain the
   routings only (`"enabled": false` for disabled ones). Store that JSON next to
   the APVTS tree in `getStateInformation`.
